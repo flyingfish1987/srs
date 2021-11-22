@@ -1,8 +1,25 @@
-//
-// Copyright (c) 2013-2021 Winlin
-//
-// SPDX-License-Identifier: MIT
-//
+/**
+ * The MIT License (MIT)
+ *
+ * Copyright (c) 2013-2020 Winlin
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of
+ * this software and associated documentation files (the "Software"), to deal in
+ * the Software without restriction, including without limitation the rights to
+ * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+ * the Software, and to permit persons to whom the Software is furnished to do so,
+ * subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+ * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+ * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+ * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+ * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
 
 #ifndef SRS_KERNEL_CODEC_HPP
 #define SRS_KERNEL_CODEC_HPP
@@ -241,6 +258,10 @@ public:
      */
     // TODO: FIXME: Remove it, use SrsFormat instead.
     static bool sh(char* data, int size);
+	/**
+     * check codec hevc.
+     */
+    static bool hevc(char* data, int size);
     /**
      * check codec h264.
      */
@@ -286,9 +307,6 @@ extern int srs_flv_srates[];
  * the aac sample rate map
  */
 extern int srs_aac_srates[];
-
-// The number of aac samplerates, size for srs_aac_srates.
-#define SrsAAcSampleRateNumbers 16
 
 // The impossible aac sample rate index.
 #define SrsAacSampleRateUnset 15
@@ -379,25 +397,36 @@ enum SrsAvcNaluType
     // Coded slice extension slice_layer_extension_rbsp( )
     SrsAvcNaluTypeCodedSliceExt = 20,
 };
-std::string srs_avc_nalu2str(SrsAvcNaluType nalu_type);
 
-/**
- * Table 7-6 â€“ Name association to slice_type
- * ISO_IEC_14496-10-AVC-2012.pdf, page 105.
- */
-enum SrsAvcSliceType
+enum SrsHEvcNaluType
 {
-    SrsAvcSliceTypeP   = 0,
-    SrsAvcSliceTypeB   = 1,
-    SrsAvcSliceTypeI   = 2,
-    SrsAvcSliceTypeSP  = 3,
-    SrsAvcSliceTypeSI  = 4,
-    SrsAvcSliceTypeP1  = 5,
-    SrsAvcSliceTypeB1  = 6,
-    SrsAvcSliceTypeI1  = 7,
-    SrsAvcSliceTypeSP1 = 8,
-    SrsAvcSliceTypeSI1 = 9,
+    SrsHEvcNaluTypeCODE_SLICE_TRAIL_N = 0, //·Ç¹Ø¼üÖ¡
+	SrsHEvcNaluTypeCODED_SLICE_TRAIL_R,
+	SrsHEvcNaluTypeCODED_SLICE_TSA_N,
+	SrsHEvcNaluTypeCODED_SLICE_TSA_R,
+	SrsHEvcNaluTypeCODED_SLICE_STSA_N,
+	SrsHEvcNaluTypeCODED_SLICE_STSA_R,
+	SrsHEvcNaluTypeCODED_SLICE_RADL_N,
+	SrsHEvcNaluTypeCODED_SLICE_RADL_R,
+	SrsHEvcNaluTypeCODED_SLICE_RASL_N,
+	SrsHEvcNaluTypeCODE_SLICE_RASL_R = 9,
+	SrsHEvcNaluTypeReserved = 15,
+	SrsHEvcNaluTypeCODED_SLICE_BLA_W_LP = 16, // ¹Ø¼üÖ¡
+	SrsHEvcNaluTypeCODE_SLICE_BLA_W_RADL,
+	SrsHEvcNaluTypeCODE_SLICE_BLA_N_LP,
+	SrsHEvcNaluTypeCODE_SLICE_IDR_W_RADL,
+	SrsHEvcNaluTypeCODE_SLICE_IDR_N_LP = 20,
+	SrsHEvcNaluTypeCODE_SLICE_CRA = 21,
+	SrsHEvcNaluTypeVPS = 32,
+	SrsHEvcNaluTypeSPS = 33,
+	SrsHEvcNaluTypePPS = 34,
+	SrsHEvcNaluTypeAccessUnitDelimiter = 35,
+	SrsHEvcNaluTypePrefixSEI = 39,
+	SrsHEvcNaluTypeSuffixSEI = 40,
+	SrsHEvcNaluTypeInvalid = 64,
 };
+
+std::string srs_avc_nalu2str(SrsAvcNaluType nalu_type);
 
 /**
  * the avc payload format, must be ibmf or annexb format.
@@ -479,6 +508,18 @@ enum SrsAvcProfile
 };
 std::string srs_avc_profile2str(SrsAvcProfile profile);
 
+enum SrsHEvcProfile
+{
+	SrsHEvcProfileReserved = 0,
+    
+    // @see ffmpeg, libavcodec/avcodec.h:2713
+    SrsHEvcProfileMain = 1,
+    SrsHEvcProfileMain10 = 2,
+    SrsHEvcProfileMainStillPicture = 3,
+    SrsHEvcProfileRext = 4,
+};
+std::string srs_hevc_profile2str(SrsHEvcProfile profile);
+
 /**
  * the level for avc/h.264.
  * @see Annex A Profiles and levels, ISO_IEC_14496-10-AVC-2003.pdf, page 207.
@@ -504,6 +545,28 @@ enum SrsAvcLevel
 };
 std::string srs_avc_level2str(SrsAvcLevel level);
 
+enum SrsHEvcLevel
+{
+    SrsHEvcLevelReserved = 0,
+
+	// refer to https://gist.github.com/yohhoy/2abc28b611797e7b407ae98faa7430e7
+    SrsHEvcLevel_1 = 30,
+    SrsHEvcLevel_2 = 60,
+    SrsHEvcLevel_21 = 63,
+    SrsHEvcLevel_3 = 90,
+    SrsHEvcLevel_31 = 93,
+    SrsHEvcLevel_4 = 120,
+    SrsHEvcLevel_41 = 123,
+    SrsHEvcLevel_5 = 150,
+    SrsHEvcLevel_51 = 153,
+    SrsHEvcLevel_52 = 156,
+    SrsHEvcLevel_6 = 180,
+    SrsHEvcLevel_61 = 183,
+    SrsHEvcLevel_62 = 186,
+};
+std::string srs_hevc_level2str(SrsHEvcLevel level);
+
+
 /**
  * A sample is the unit of frame.
  * It's a NALU for H.264.
@@ -515,19 +578,11 @@ class SrsSample
 public:
     // The size of unit.
     int size;
-    // The ptr of unit, user must free it.
+    // The ptr of unit, user must manage it.
     char* bytes;
-    // Whether is B frame.
-    bool bframe;
 public:
     SrsSample();
-    SrsSample(char* b, int s);
-    ~SrsSample();
-public:
-    // If we need to know whether sample is bframe, we have to parse the NALU payload.
-    srs_error_t parse_bframe();
-    // Copy sample, share the bytes pointer.
-    SrsSample* copy();
+    virtual ~SrsSample();
 };
 
 /**
@@ -618,10 +673,12 @@ public:
     SrsAvcProfile avc_profile;
     // level_idc, ISO_IEC_14496-10-AVC-2003.pdf, page 45.
     SrsAvcLevel avc_level;
+	SrsHEvcProfile hevc_profile;
+	SrsHEvcLevel hevc_level;
     // lengthSizeMinusOne, ISO_IEC_14496-15-AVC-format-2012.pdf, page 16
     int8_t NAL_unit_length;
-    // Note that we may resize the vector, so the under-layer bytes may change.
-    std::vector<char> sequenceParameterSetNALUnit;
+	std::vector<char> videoParameterSetNALUnit;
+	std::vector<char> sequenceParameterSetNALUnit;
     std::vector<char> pictureParameterSetNALUnit;
 public:
     // the avc payload format.
@@ -633,8 +690,9 @@ public:
     virtual bool is_avc_codec_ok();
 };
 
-// A frame, consists of a codec and a group of samples.
-// TODO: FIXME: Rename to packet to follow names of FFmpeg, which means before decoding or after decoding.
+/**
+ * A frame, consists of a codec and a group of samples.
+ */
 class SrsFrame
 {
 public:
@@ -659,8 +717,9 @@ public:
     virtual srs_error_t add_sample(char* bytes, int size);
 };
 
-// A audio frame, besides a frame, contains the audio frame info, such as frame type.
-// TODO: FIXME: Rename to packet to follow names of FFmpeg, which means before decoding or after decoding.
+/**
+ * A audio frame, besides a frame, contains the audio frame info, such as frame type.
+ */
 class SrsAudioFrame : public SrsFrame
 {
 public:
@@ -672,8 +731,9 @@ public:
     virtual SrsAudioCodecConfig* acodec();
 };
 
-// A video frame, besides a frame, contains the video frame info, such as frame type.
-// TODO: FIXME: Rename to packet to follow names of FFmpeg, which means before decoding or after decoding.
+/**
+ * A video frame, besides a frame, contains the video frame info, such as frame type.
+ */
 class SrsVideoFrame : public SrsFrame
 {
 public:
@@ -692,8 +752,6 @@ public:
     SrsVideoFrame();
     virtual ~SrsVideoFrame();
 public:
-    // Initialize the frame, to parse sampels.
-    virtual srs_error_t initialize(SrsCodecConfig* c);
     // Add the sample without ANNEXB or IBMF header, or RAW AAC or MP3 data.
     virtual srs_error_t add_sample(char* bytes, int size);
 public:
@@ -747,6 +805,10 @@ private:
     virtual srs_error_t avc_demux_sps_pps(SrsBuffer* stream);
     virtual srs_error_t avc_demux_sps();
     virtual srs_error_t avc_demux_sps_rbsp(char* rbsp, int nb_rbsp);
+	// Parse the HEVC SPS/PPS.
+	virtual srs_error_t hevc_demux_sps_pps(SrsBuffer* stream);
+	virtual srs_error_t hevc_demux_sps();
+	virtual srs_error_t hevc_demux_sps_rbsp(char* rbsp, int nb_rbsp);
 private:
     // Parse the H.264 NALUs.
     virtual srs_error_t video_nalu_demux(SrsBuffer* stream);

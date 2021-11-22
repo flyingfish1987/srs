@@ -615,7 +615,8 @@ srs_error_t SrsGopCache::cache(SrsSharedPtrMessage* shared_msg)
     // got video, update the video count if acceptable
     if (msg->is_video()) {
         // drop video when not h.264
-        if (!SrsFlvVideo::h264(msg->payload, msg->size)) {
+        if (!SrsFlvVideo::h264(msg->payload, msg->size) &&
+			!SrsFlvVideo::hevc(msg->payload, msg->size)) {
             return err;
         }
         
@@ -1046,13 +1047,15 @@ srs_error_t SrsOriginHub::on_video(SrsSharedPtrMessage* shared_video, bool is_se
         
         // when got video stream info.
         SrsStatistic* stat = SrsStatistic::instance();
-        if ((err = stat->on_video_info(req, SrsVideoCodecIdAVC, c->avc_profile, c->avc_level, c->width, c->height)) != srs_success) {
+        if ((err = stat->on_video_info(req, c->id, c->avc_profile, c->avc_level, c->hevc_profile, c->hevc_level, c->width, c->height)) != srs_success) {
             return srs_error_wrap(err, "stat video");
         }
         
         srs_trace("%dB video sh,  codec(%d, profile=%s, level=%s, %dx%d, %dkbps, %.1ffps, %.1fs)",
-                  msg->size, c->id, srs_avc_profile2str(c->avc_profile).c_str(),
-                  srs_avc_level2str(c->avc_level).c_str(), c->width, c->height,
+                  msg->size, c->id, 
+                  c->id == SrsVideoCodecIdHEVC ? srs_hevc_profile2str(c->hevc_profile).c_str() : srs_avc_profile2str(c->avc_profile).c_str(),
+                  c->id == SrsVideoCodecIdHEVC ? srs_hevc_level2str(c->hevc_level).c_str() : srs_avc_level2str(c->avc_level).c_str(), 
+                  c->width, c->height,
                   c->video_data_rate / 1000, c->frame_rate, c->duration);
     }
 
@@ -2276,7 +2279,7 @@ srs_error_t SrsLiveSource::on_video(SrsCommonMessage* shared_video)
         }
     }
     last_packet_time = shared_video->header.timestamp;
-    
+
     // drop any unknown header video.
     // @see https://github.com/ossrs/srs/issues/421
     if (!SrsFlvVideo::acceptable(shared_video->payload, shared_video->size)) {

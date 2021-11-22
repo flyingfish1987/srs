@@ -108,7 +108,7 @@ bool SrsFlvVideo::keyframe(char* data, int size)
 bool SrsFlvVideo::sh(char* data, int size)
 {
     // sequence header only for h264
-    if (!h264(data, size)) {
+    if (!h264(data, size) && !hevc(data, size)) {
         return false;
     }
     
@@ -116,12 +116,16 @@ bool SrsFlvVideo::sh(char* data, int size)
     if (size < 2) {
         return false;
     }
-    
+	
     char frame_type = data[0];
     frame_type = (frame_type >> 4) & 0x0F;
     
     char avc_packet_type = data[1];
-    
+
+	if (hevc(data, size)) {
+		return avc_packet_type == SrsVideoAvcFrameTraitSequenceHeader;
+	}
+	
     return frame_type == SrsVideoAvcFrameTypeKeyFrame
     && avc_packet_type == SrsVideoAvcFrameTraitSequenceHeader;
 }
@@ -139,6 +143,19 @@ bool SrsFlvVideo::h264(char* data, int size)
     return codec_id == SrsVideoCodecIdAVC;
 }
 
+bool SrsFlvVideo::hevc(char* data, int size)
+{
+    // 1bytes required.
+    if (size < 1) {
+        return false;
+    }
+    
+    char codec_id = data[0];
+    codec_id = codec_id & 0x0F;
+    
+    return codec_id == SrsVideoCodecIdHEVC;
+}
+
 bool SrsFlvVideo::acceptable(char* data, int size)
 {
     // 1bytes required.
@@ -150,11 +167,11 @@ bool SrsFlvVideo::acceptable(char* data, int size)
     char codec_id = frame_type & 0x0f;
     frame_type = (frame_type >> 4) & 0x0f;
     
-    if (frame_type < 1 || frame_type > 5) {
+    if (frame_type < SrsVideoAvcFrameTypeKeyFrame || frame_type > SrsVideoAvcFrameTypeVideoInfoFrame) {
         return false;
     }
     
-    if (codec_id < 2 || codec_id > 7) {
+    if ((codec_id < SrsVideoCodecIdSorensonH263 || codec_id > SrsVideoCodecIdAVC) && codec_id != SrsVideoCodecIdHEVC) {
         return false;
     }
     
@@ -323,6 +340,17 @@ string srs_avc_profile2str(SrsAvcProfile profile)
     }
 }
 
+string srs_hevc_profile2str(SrsHEvcProfile profile)
+{
+	switch (profile) {
+        case SrsHEvcProfileMain: return "Main";
+        case SrsHEvcProfileMain10: return "Main10";
+		case SrsHEvcProfileMainStillPicture: return "MainStillPicture";
+		case SrsHEvcProfileRext: return "Rext";
+        default: return "Other";
+    }
+}
+
 string srs_avc_level2str(SrsAvcLevel level)
 {
     switch (level) {
@@ -342,6 +370,26 @@ string srs_avc_level2str(SrsAvcLevel level)
         case SrsAvcLevel_51: return "5.1";
         default: return "Other";
     }
+}
+
+string srs_hevc_level2str(SrsHEvcLevel level)
+{
+	switch (level) {
+		case SrsHEvcLevel_1: return "1";
+		case SrsHEvcLevel_2: return "2";
+		case SrsHEvcLevel_21: return "2.1";
+		case SrsHEvcLevel_3: return "3";
+		case SrsHEvcLevel_31: return "3.1";
+		case SrsHEvcLevel_4: return "4";
+		case SrsHEvcLevel_41: return "4.1";
+		case SrsHEvcLevel_5: return "5";
+		case SrsHEvcLevel_51: return "5.1";
+		case SrsHEvcLevel_52: return "5.2";
+		case SrsHEvcLevel_6: return "6";
+		case SrsHEvcLevel_61: return "6.1";
+		case SrsHEvcLevel_62: return "6.2";
+		default: return "Other";
+	}
 }
 
 SrsSample::SrsSample()
@@ -541,21 +589,40 @@ srs_error_t SrsVideoFrame::add_sample(char* bytes, int size)
     if ((err = SrsFrame::add_sample(bytes, size)) != srs_success) {
         return srs_error_wrap(err, "add frame");
     }
-    
-    // for video, parse the nalu type, set the IDR flag.
-    SrsAvcNaluType nal_unit_type = (SrsAvcNaluType)(bytes[0] & 0x1f);
-    
-    if (nal_unit_type == SrsAvcNaluTypeIDR) {
-        has_idr = true;
-    } else if (nal_unit_type == SrsAvcNaluTypeSPS || nal_unit_type == SrsAvcNaluTypePPS) {
-        has_sps_pps = true;
-    } else if (nal_unit_type == SrsAvcNaluTypeAccessUnitDelimiter) {
-        has_aud = true;
-    }
-    
-    if (first_nalu_type == SrsAvcNaluTypeReserved) {
-        first_nalu_type = nal_unit_type;
-    }
+
+	if (vcodec() == NULL || vcodec()->id == SrsVideoCodecIdAVC) {
+		// for video, parse the nalu type, set the IDR flag.
+	    SrsAvcNaluType nal_unit_type = (SrsAvcNaluType)(bytes[0] & 0x1f);
+	    
+	    if (nal_unit_type == SrsAvcNaluTypeIDR) {
+	        has_idr = true;
+	    } else if (nal_unit_type == SrsAvcNaluTypeSPS || nal_unit_type == SrsAvcNaluTypePPS) {
+	        has_sps_pps = true;
+	    } else if (nal_unit_type == SrsAvcNaluTypeAccessUnitDelimiter) {
+	        has_aud = true;
+	    }
+	    
+	    if (first_nalu_type == SrsAvcNaluTypeReserved) {
+	        first_nalu_type = nal_unit_type;
+	    }
+	}
+    else if (vcodec()->id == SrsVideoCodecIdHEVC) {
+		// for video, parse the nalu type, set the IDR flag.
+	    SrsHEvcNaluType nal_unit_type = (SrsHEvcNaluType)((bytes[0] & 0x7e) >> 1);
+	    
+	    if (nal_unit_type >= SrsHEvcNaluTypeCODED_SLICE_BLA_W_LP && nal_unit_type <= SrsHEvcNaluTypeCODE_SLICE_CRA) {
+	        has_idr = true;
+	    } else if (nal_unit_type == SrsHEvcNaluTypeVPS ||
+	    	nal_unit_type == SrsHEvcNaluTypeSPS ||nal_unit_type == SrsHEvcNaluTypePPS) {
+	        has_sps_pps = true;
+	    } else if (nal_unit_type == SrsHEvcNaluTypeAccessUnitDelimiter) {
+	        has_aud = true;
+	    }
+	    
+	    if (first_nalu_type == SrsAvcNaluTypeReserved) {
+	        first_nalu_type = (SrsAvcNaluType)nal_unit_type;
+	    }
+	}
     
     return err;
 }
@@ -653,7 +720,7 @@ srs_error_t SrsFormat::on_video(int64_t timestamp, char* data, int size)
     SrsVideoCodecId codec_id = (SrsVideoCodecId)(frame_type & 0x0f);
     
     // TODO: Support other codecs.
-    if (codec_id != SrsVideoCodecIdAVC) {
+    if (codec_id != SrsVideoCodecIdAVC && codec_id != SrsVideoCodecIdHEVC) {
         return err;
     }
     
@@ -724,8 +791,8 @@ srs_error_t SrsFormat::video_avc_demux(SrsBuffer* stream, int64_t timestamp)
     }
     
     // only support h.264/avc
-    if (codec_id != SrsVideoCodecIdAVC) {
-        return srs_error_new(ERROR_HLS_DECODE_ERROR, "avc only support video h.264/avc, actual=%d", codec_id);
+    if (codec_id != SrsVideoCodecIdAVC && codec_id != SrsVideoCodecIdHEVC) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "avc only support video h.264/avc and h.265/hevc, actual=%d", codec_id);
     }
     vcodec->id = codec_id;
     
@@ -746,7 +813,10 @@ srs_error_t SrsFormat::video_avc_demux(SrsBuffer* stream, int64_t timestamp)
     
     if (avc_packet_type == SrsVideoAvcFrameTraitSequenceHeader) {
         // TODO: FIXME: Maybe we should ignore any error for parsing sps/pps.
-        if ((err = avc_demux_sps_pps(stream)) != srs_success) {
+        if (codec_id == SrsVideoCodecIdAVC && (err = avc_demux_sps_pps(stream)) != srs_success) {
+            return srs_error_wrap(err, "demux SPS/PPS");
+        }
+		if (codec_id == SrsVideoCodecIdHEVC && (err = hevc_demux_sps_pps(stream)) != ERROR_SUCCESS) {
             return srs_error_wrap(err, "demux SPS/PPS");
         }
     } else if (avc_packet_type == SrsVideoAvcFrameTraitNALU){
@@ -759,6 +829,147 @@ srs_error_t SrsFormat::video_avc_demux(SrsBuffer* stream, int64_t timestamp)
     
     return err;
 }
+
+srs_error_t SrsFormat::hevc_demux_sps_pps(SrsBuffer* stream)
+{
+	// refer to https://blog.csdn.net/yihuanyihuan/article/details/88717809
+    int hevc_extra_size = stream->size() - stream->pos();
+	srs_trace("hevc extra data size: %d, stream pos %d, stream size %d",
+		hevc_extra_size, stream->pos(), stream->size());
+	if (hevc_extra_size > 0) {
+        char *copy_stream_from = stream->data() + stream->pos();
+        vcodec->avc_extra_data = std::vector<char>(copy_stream_from, copy_stream_from + hevc_extra_size);
+    }
+    
+    if (!stream->require(6)) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "hevc decode sequence header");
+    }
+
+	int chromaFormat, bitDepthLumaMinus8, bitDepthChromaMinus8, avgFrameRate;
+	int nal_type;
+	
+    stream->read_1bytes(); // version
+    int8_t profile = stream->read_1bytes(); // profile 2,1,5
+    vcodec->hevc_profile = (SrsHEvcProfile)(profile & 0x1f);
+    stream->read_4bytes(); // 32
+	stream->read_4bytes(); // 48
+	stream->read_2bytes();
+	vcodec->hevc_level = (SrsHEvcLevel)stream->read_1bytes(); // general_level_idc
+	stream->read_2bytes(); // min_spatial_segmentation_idc (12bit)
+	stream->read_1bytes(); // parallelismType (2bit) & 0x3
+	chromaFormat = stream->read_1bytes(); // chromaFormat (2bit) & 0x3
+	bitDepthLumaMinus8 = stream->read_1bytes(); // bitDepthLumaMinus8 (3bit) & 0x7
+	bitDepthChromaMinus8 = stream->read_1bytes(); // bitDepthChromaMinus8 (3bit) & 0x7
+	avgFrameRate = stream->read_2bytes();
+
+	srs_trace("hecv profile: %d(%s), level: %d(%s)", 
+		vcodec->hevc_profile, srs_hevc_profile2str(vcodec->hevc_profile).c_str(),
+		vcodec->hevc_level, srs_hevc_level2str(vcodec->hevc_level).c_str());
+	srs_trace("hevc avgFrameRate: %d", avgFrameRate);
+
+	chromaFormat &= 0x3;
+	bitDepthLumaMinus8 &= 0x7;
+	bitDepthChromaMinus8 &= 0x7;
+	
+	vcodec->frame_rate = avgFrameRate;
+
+	// constantFrameRate(2bit) numTemporalLaters(3) tempporalIdNetsted(1) lengthSizeMinusOne(2)
+    // parse the NALU size.
+    int8_t lengthSizeMinusOne = stream->read_1bytes();
+    lengthSizeMinusOne &= 0x03;
+    vcodec->NAL_unit_length = lengthSizeMinusOne;
+	srs_trace("hevc NAL_unit_length: %d", lengthSizeMinusOne);
+    
+    if (vcodec->NAL_unit_length == 2) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "sps lengthSizeMinusOne should never be 2");
+    }
+
+	int8_t numOfArrays = stream->read_1bytes();
+	srs_trace("hevc numOfArrays: %d", numOfArrays);
+
+
+	// vps
+	if (!stream->require(1)) {
+		return srs_error_new(ERROR_HLS_DECODE_ERROR, "decode VPS");
+	}
+	nal_type = stream->read_1bytes() & 0x3f;
+	if (nal_type != 32) {
+		return srs_error_new(ERROR_HLS_DECODE_ERROR, "not vps nal: %d", nal_type);
+	}
+	uint16_t numOfVideoParameterSets = stream->read_2bytes();
+    srs_trace("hevc numOfVideoParameterSets: %d", numOfVideoParameterSets);
+	if (numOfVideoParameterSets != 1) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "hevc NOT support more than 1 vps");
+    }
+    if (!stream->require(2)) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "decode VPS size");
+    }
+    uint16_t videoParameterSetLength = stream->read_2bytes();
+	srs_trace("hevc videoParameterSetLength: %d, pos %d", videoParameterSetLength, stream->pos());
+	if (!stream->require(videoParameterSetLength)) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "decode VPS data");
+    }
+    if (videoParameterSetLength > 0) {
+		
+        vcodec->videoParameterSetNALUnit.resize(videoParameterSetLength);
+        stream->read_bytes(&vcodec->videoParameterSetNALUnit[0], videoParameterSetLength);
+    }
+
+	// sps
+    if (!stream->require(1)) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "decode SPS");
+    }
+	nal_type = stream->read_1bytes() & 0x3f;
+	if (nal_type != 33) {
+		return srs_error_new(ERROR_HLS_DECODE_ERROR, "not sps nal: %d", nal_type);
+	}
+    uint16_t numOfSequenceParameterSets = stream->read_2bytes();
+	srs_trace("hevc numOfSequenceParameterSets: %d", numOfSequenceParameterSets);
+    if (numOfSequenceParameterSets != 1) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "hevc NOT support more than 1 sps");
+    }
+    if (!stream->require(2)) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "decode SPS size");
+    }
+    uint16_t sequenceParameterSetLength = stream->read_2bytes();
+	srs_trace("hevc sequenceParameterSetLength: %d, pos %d", sequenceParameterSetLength, stream->pos());
+    if (!stream->require(sequenceParameterSetLength)) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "decode SPS data");
+    }
+    if (sequenceParameterSetLength > 0) {
+        vcodec->sequenceParameterSetNALUnit.resize(sequenceParameterSetLength);
+        stream->read_bytes(&vcodec->sequenceParameterSetNALUnit[0], sequenceParameterSetLength);
+    }
+	
+    // pps
+    if (!stream->require(1)) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "decode PPS");
+    }
+	nal_type = stream->read_1bytes() & 0x3f;
+	if (nal_type != 34) {
+		return srs_error_new(ERROR_HLS_DECODE_ERROR, "not sps nal: %d", nal_type);
+	}
+    uint16_t numOfPictureParameterSets = stream->read_2bytes();
+    srs_trace("hevc numOfPictureParameterSets: %d", numOfPictureParameterSets);
+    if (numOfPictureParameterSets != 1) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "hevc NOT support more than 1 pps");
+    }
+    if (!stream->require(2)) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "decode PPS size");
+    }
+    uint16_t pictureParameterSetLength = stream->read_2bytes();
+	srs_trace("hevc pictureParameterSetLength: %d, pos %d", pictureParameterSetLength, stream->pos());
+    if (!stream->require(pictureParameterSetLength)) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "decode PPS data");
+    }
+    if (pictureParameterSetLength > 0) {
+        vcodec->pictureParameterSetNALUnit.resize(pictureParameterSetLength);
+        stream->read_bytes(&vcodec->pictureParameterSetNALUnit[0], pictureParameterSetLength);
+    }
+    
+    return hevc_demux_sps();
+}
+
 
 // For media server, we don't care the codec, so we just try to parse sps-pps, and we could ignore any error if fail.
 // LCOV_EXCL_START
@@ -848,6 +1059,196 @@ srs_error_t SrsFormat::avc_demux_sps_pps(SrsBuffer* stream)
         }
     }
     return avc_demux_sps();
+}
+
+srs_error_t SrsFormat::hevc_demux_sps()
+{
+	srs_error_t err = srs_success;
+		
+	if (vcodec->sequenceParameterSetNALUnit.empty()) {
+		return err;
+	}
+	
+	char* sps = &vcodec->sequenceParameterSetNALUnit[0];
+	int nbsps = (int)vcodec->sequenceParameterSetNALUnit.size();
+	
+	SrsBuffer stream(sps, nbsps);
+	
+	// for NALU, 7.3.1 NAL unit syntax
+	// ISO_IEC_14496-10-AVC-2012.pdf, page 61.
+	if (!stream.require(1)) {
+		return srs_error_new(ERROR_HLS_DECODE_ERROR, "decode SPS");
+	}
+	int16_t nutv = stream.read_2bytes();
+
+	/*
+	nal_unit_header( ) {
+		forbidden_zero_bit        f(1)
+		nal_unit_type             u(6)
+		nuh_reserved_zero_6bits   u(6)
+		nuh_temporal_id_plus1     u(3)
+	*/
+	
+	// forbidden_zero_bit shall be equal to 0.
+	int8_t forbidden_zero_bit = (nutv >> 15) & 0x01;
+	if (forbidden_zero_bit) {
+		return srs_error_new(ERROR_HLS_DECODE_ERROR, "forbidden_zero_bit shall be equal to 0");
+	}
+	
+	// 7.4.1 NAL unit semantics
+	// ISO_IEC_14496-10-AVC-2012.pdf, page 61.
+	// nal_unit_type specifies the type of RBSP data structure contained in the NAL unit as specified in Table 7-1.
+	SrsHEvcNaluType nal_unit_type = (SrsHEvcNaluType)((nutv & 0x7e00) >> 9);
+	if (nal_unit_type != SrsHEvcNaluTypeSPS) {
+		return srs_error_new(ERROR_HLS_DECODE_ERROR, "for sps, nal_unit_type shall be equal to 33: %d", nal_unit_type);
+	}
+	
+	// decode the rbsp from sps.
+	// rbsp[ i ] a raw byte sequence payload is specified as an ordered sequence of bytes.
+	std::vector<int8_t> rbsp(vcodec->sequenceParameterSetNALUnit.size());
+
+	int nb_rbsp = 0;
+	while (!stream.empty()) {
+		rbsp[nb_rbsp] = stream.read_1bytes();
+		
+		// XX 00 00 03 XX, the 03 byte should be drop.
+		if (nb_rbsp > 2 && rbsp[nb_rbsp - 2] == 0 && rbsp[nb_rbsp - 1] == 0 && rbsp[nb_rbsp] == 3) {
+			// read 1byte more.
+			if (stream.empty()) {
+				break;
+			}
+			rbsp[nb_rbsp] = stream.read_1bytes();
+			nb_rbsp++;
+			
+			continue;
+		}
+		
+		nb_rbsp++;
+	}
+	
+	return hevc_demux_sps_rbsp((char*)&rbsp[0], nb_rbsp);
+
+}
+
+srs_error_t SrsFormat::hevc_demux_sps_rbsp(char* rbsp, int nb_rbsp)
+{
+	srs_error_t err = srs_success;
+
+	if (!avc_parse_sps) {
+        return err;
+    }
+
+	srs_trace("rbsp nb: %d", nb_rbsp);
+
+	// reparse the rbsp.
+    SrsBuffer stream(rbsp, nb_rbsp);
+
+	if (!stream.require(20))
+		return srs_error_new(ERROR_HLS_DECODE_ERROR, "SPS data size TOO small");
+
+	// seq_parameter_set_rbsp()
+	// 4 3 1
+	int8_t seq_parameter_set_rbsp = stream.read_1bytes(); // sps_video_parameter_set_id
+
+	int sps_video_parameter_set_id = (seq_parameter_set_rbsp & 0xF0) >> 4;
+	int sps_max_sub_layers_minus1 = (seq_parameter_set_rbsp >> 1) & 0x7;
+	int sps_temporal_id_nesting_flag = seq_parameter_set_rbsp & 0x1;
+	if (sps_max_sub_layers_minus1 > 6) {
+		return srs_error_new(ERROR_HLS_DECODE_ERROR, "SPS data corrupted: sps_max_sub_layers_minus1 > 6");
+	}
+
+	srs_trace("sps_video_parameter_set_id: %d", sps_video_parameter_set_id);
+	srs_trace("sps_max_sub_layers_minus1: %d", sps_max_sub_layers_minus1);
+	srs_trace("sps_temporal_id_nesting_flag: %d", sps_temporal_id_nesting_flag);
+
+	{
+		int8_t data = stream.read_1bytes(); // 2 1 5
+		int profile = data & 0x1F;
+		srs_trace("hevc profile: %d", profile);
+		
+		stream.read_4bytes();// 32 1 1 1 1 44 (4 6)
+		stream.read_4bytes();
+		stream.read_2bytes();
+		//srs_avc_nalu_read_bit
+
+		int8_t general_level_idc = stream.read_1bytes();
+		srs_trace("general_level_idc: %d", general_level_idc);
+		if (sps_max_sub_layers_minus1 > 0) {
+			int16_t flags = stream.read_2bytes();
+			uint8_t sub_layer_profile_present_flag[6] = {0};
+			uint8_t sub_layer_level_present_flag[6]   = {0};
+			for (int i = 0; i < sps_max_sub_layers_minus1; i++) {
+				sub_layer_profile_present_flag[i] = (flags >> (16 - i - 1)) & 0x1;
+				sub_layer_level_present_flag[i] = (flags >> (16 - i - 1 - 1)) & 0x1;
+			}
+			for (int i = sps_max_sub_layers_minus1; i < 8; i++) {
+				//uint8_t reserved_zero_2bits = bs.GetWord(2);
+			}
+			for (int i = 0; i < sps_max_sub_layers_minus1; i++) {
+				if (sub_layer_profile_present_flag[i]) {
+					// 2 1 5
+					stream.read_1bytes();
+						// 32 
+						stream.read_4bytes();
+					// 1 1 1 1 44
+					stream.read_4bytes();
+					stream.read_2bytes();
+				}
+				if (sub_layer_level_present_flag[i]) {
+					stream.read_1bytes();// sub_layer_level_idc[i]
+				}
+			}
+		}
+	}
+
+	SrsBitBuffer bs(&stream);
+
+	int32_t sps_seq_parameter_set_id = -1;
+    if ((err = srs_avc_nalu_read_uev(&bs, sps_seq_parameter_set_id)) != srs_success) {
+        return srs_error_wrap(err, "read seq_parameter_set_id");
+    }
+    if (sps_seq_parameter_set_id > 15) {
+        return srs_error_new(ERROR_HLS_DECODE_ERROR, "sps the sps_seq_parameter_set_id invalid: %d", sps_seq_parameter_set_id);
+    }
+	srs_trace("sps_seq_parameter_set_id %d", sps_seq_parameter_set_id);
+
+	int32_t chroma_format_idc = -1;
+	if ((err = srs_avc_nalu_read_uev(&bs, chroma_format_idc)) != srs_success) {
+		return srs_error_wrap(err, "read chroma_format_idc");
+	}
+	srs_trace("chroma_format_idc %d", chroma_format_idc);
+	if (chroma_format_idc > 3) {
+		return srs_error_new(ERROR_HLS_DECODE_ERROR, "sps the chroma_format_idc invalid: %d", chroma_format_idc);
+	}
+	if (chroma_format_idc == 3) {
+		// not supported
+		//bs.GetWord(1);
+		return srs_error_new(ERROR_HLS_DECODE_ERROR, "not support chroma_format_idc = 3");
+	}
+
+	int32_t pic_width_in_luma_samples = -1; // pic_width_in_luma_samples
+    if ((err = srs_avc_nalu_read_uev(&bs, pic_width_in_luma_samples)) != srs_success) {
+        return srs_error_wrap(err, "read width");
+    }
+	
+	int32_t pic_height_in_luma_samples = -1; // pic_height_in_luma_samples
+	if ((err = srs_avc_nalu_read_uev(&bs, pic_height_in_luma_samples)) != srs_success) {
+		return srs_error_wrap(err, "read height");
+	}
+
+	/*
+	sub_width_c  = ((1==chroma_format_idc)||(2 == chroma_format_idc))&&(0==separate_colour_plane_flag)?2:1;
+	sub_height_c = (1==chroma_format_idc)&& (0 == separate_colour_plane_flag)?2:1;
+	width  -= (sub_width_c*conf_win_right_offset + sub_width_c*conf_win_left_offset);
+	height -= (sub_height_c*conf_win_bottom_offset + sub_height_c*conf_win_top_offset);
+	*/
+	
+	srs_trace("hevc width %d, height %d", pic_width_in_luma_samples, pic_height_in_luma_samples);
+
+	vcodec->width = pic_width_in_luma_samples;
+    vcodec->height = pic_height_in_luma_samples;
+
+	return err;
 }
 
 srs_error_t SrsFormat::avc_demux_sps()
