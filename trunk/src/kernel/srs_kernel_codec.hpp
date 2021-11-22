@@ -398,9 +398,27 @@ enum SrsAvcNaluType
     SrsAvcNaluTypeCodedSliceExt = 20,
 };
 
+/**
+ * Table 7-6 – Name association to slice_type
+ * ISO_IEC_14496-10-AVC-2012.pdf, page 105.
+ */
+enum SrsAvcSliceType
+{
+    SrsAvcSliceTypeP   = 0,
+    SrsAvcSliceTypeB   = 1,
+    SrsAvcSliceTypeI   = 2,
+    SrsAvcSliceTypeSP  = 3,
+    SrsAvcSliceTypeSI  = 4,
+    SrsAvcSliceTypeP1  = 5,
+    SrsAvcSliceTypeB1  = 6,
+    SrsAvcSliceTypeI1  = 7,
+    SrsAvcSliceTypeSP1 = 8,
+    SrsAvcSliceTypeSI1 = 9,
+};
+
 enum SrsHEvcNaluType
 {
-    SrsHEvcNaluTypeCODE_SLICE_TRAIL_N = 0, //�ǹؼ�֡
+    SrsHEvcNaluTypeCODE_SLICE_TRAIL_N = 0, //�ǹؼ�֡
 	SrsHEvcNaluTypeCODED_SLICE_TRAIL_R,
 	SrsHEvcNaluTypeCODED_SLICE_TSA_N,
 	SrsHEvcNaluTypeCODED_SLICE_TSA_R,
@@ -411,7 +429,7 @@ enum SrsHEvcNaluType
 	SrsHEvcNaluTypeCODED_SLICE_RASL_N,
 	SrsHEvcNaluTypeCODE_SLICE_RASL_R = 9,
 	SrsHEvcNaluTypeReserved = 15,
-	SrsHEvcNaluTypeCODED_SLICE_BLA_W_LP = 16, // �ؼ�֡
+	SrsHEvcNaluTypeCODED_SLICE_BLA_W_LP = 16, // �ؼ�֡
 	SrsHEvcNaluTypeCODE_SLICE_BLA_W_RADL,
 	SrsHEvcNaluTypeCODE_SLICE_BLA_N_LP,
 	SrsHEvcNaluTypeCODE_SLICE_IDR_W_RADL,
@@ -580,9 +598,17 @@ public:
     int size;
     // The ptr of unit, user must manage it.
     char* bytes;
+    // Whether is B frame.
+    bool bframe;
 public:
     SrsSample();
-    virtual ~SrsSample();
+    SrsSample(char* b, int s);
+    ~SrsSample();
+public:
+    // If we need to know whether sample is bframe, we have to parse the NALU payload.
+    srs_error_t parse_bframe();
+    // Copy sample, share the bytes pointer.
+    SrsSample* copy();
 };
 
 /**
@@ -752,6 +778,8 @@ public:
     SrsVideoFrame();
     virtual ~SrsVideoFrame();
 public:
+    // Initialize the frame, to parse sampels.
+    virtual srs_error_t initialize(SrsCodecConfig* c);
     // Add the sample without ANNEXB or IBMF header, or RAW AAC or MP3 data.
     virtual srs_error_t add_sample(char* bytes, int size);
 public:
